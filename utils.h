@@ -100,13 +100,9 @@ int monero_hash_to_point(const uint8_t* hash, uint8_t* point);
  * @param ephemeral_secret  Output ephemeral secret key
  * @return                  1 if successful, 0 if failed
  */
-int monero_generate_key_image_for_output(
-    const uint8_t* tx_public_key,
-    const uint8_t* view_private_key,
-    const uint8_t* spend_private_key,
-    uint32_t output_index,
-    uint8_t* key_image,
-    uint8_t* ephemeral_secret);
+int monero_generate_key_image_for_output(const uint8_t* tx_public_key, const uint8_t* view_private_key, const uint8_t* spend_private_key, uint32_t output_index, uint8_t* key_image, uint8_t* ephemeral_secret);
+
+int generate_deterministic_tx_key(uint32_t output_index, uint8_t tx_key[32]);
 
 /**
  * Scalar operations

@@ -71,7 +71,7 @@ int monero_generate_key_derivation(const uint8_t* tx_public_key, const uint8_t* 
     
     // Decode transaction public key to a point
     ge25519 tx_pub_point;
-    if (ge25519_unpack_vartime(&tx_pub_point, tx_public_key) != 0) {
+    if (ge25519_unpack_vartime(&tx_pub_point, tx_public_key) == 0) {
         return 0; // Error: Invalid public key
     }
     
@@ -138,7 +138,7 @@ int monero_derive_public_key(const uint8_t* derivation, uint32_t output_index,
     
     // 3. Decode public_spend_key
     ge25519 point2;
-    if (ge25519_unpack_vartime(&point2, public_spend_key) != 0) {
+    if (ge25519_unpack_vartime(&point2, public_spend_key) == 0) {
         return 0; // Error: Invalid public key
     }
     
@@ -243,7 +243,7 @@ int monero_scalarmultKey(const uint8_t* P, const uint8_t* a, uint8_t* aP) {
     ge25519 point, result;
     bignum256modm scalar;
     
-    if (ge25519_unpack_vartime(&point, P) != 0) {
+    if (ge25519_unpack_vartime(&point, P) == 0) {
         return 0; // Error: Invalid point
     }
     
@@ -261,5 +261,31 @@ int monero_scalarmultBase(const uint8_t* a, uint8_t* aG) {
     expand256_modm(scalar, a, 32);
     ge25519_scalarmult_base_wrapper(&result, scalar);
     ge25519_pack(aG, &result);
+    return 1;
+}
+
+int generate_deterministic_tx_key(uint32_t output_index, uint8_t tx_key[32]) {
+    // Create input buffer: "Keyur279" + output_index
+    uint8_t input[32] = {0}; // Zero-padded buffer
+    const char* salt = "Keyur279";
+    size_t salt_len = strlen(salt);
+    
+    // Copy salt
+    memcpy(input, salt, salt_len);
+    
+    // Add output_index as little-endian uint32_t
+    input[salt_len] = (output_index) & 0xFF;
+    input[salt_len + 1] = (output_index >> 8) & 0xFF;
+    input[salt_len + 2] = (output_index >> 16) & 0xFF;
+    input[salt_len + 3] = (output_index >> 24) & 0xFF;
+    
+    // Hash with Keccak-256
+    keccak_256(input, salt_len + 4, tx_key);
+    
+    // Reduce modulo curve order to make it a valid scalar
+    bignum256modm tx_key_scalar;
+    expand256_modm(tx_key_scalar, tx_key, 32);
+    contract256_modm(tx_key, tx_key_scalar);
+    
     return 1;
 }
