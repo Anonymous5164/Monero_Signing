@@ -51,29 +51,6 @@ typedef struct {
  */
 int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig);
 
-/**
- * Verify a CLSAG signature
- * 
- * @param message Message that was signed
- * @param ring Ring of public keys and commitments  
- * @param ring_size Number of ring members
- * @param C_offset Commitment offset
- * @param sig Signature to verify
- * @return 1 if valid, 0 if invalid
- */
-int clsag_verify(const uint8_t message[32], 
-                 const ring_member_t *ring,
-                 size_t ring_size,
-                 const uint8_t C_offset[32],
-                 const clsag_signature_t *sig);
-
-/**
- * Create a dummy CLSAG signature for testing
- * 
- * @param ring_size Number of ring members
- * @param sig Output signature (caller must allocate sig->s)
- */
-void clsag_make_dummy(size_t ring_size, clsag_signature_t *sig);
 
 /**
  * Free resources allocated for CLSAG signature

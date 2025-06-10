@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "clsag.h"
+#include "./crypto/monero/xmr.h"
 
 #ifdef __cplusplus
 extern "C" {

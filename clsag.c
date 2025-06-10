@@ -2,30 +2,92 @@
 #include "sha3.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+
+static const char* mock_random_values[] = {
+    "2b057184b80721b4aa9253ee041445b42811e47e2aeb97c5a55da47b0aa42603",  // s[0]
+    "a276421e38ebf6e11ff42e9c492c62fcef57fc28e3fa43da30fae9f82e8aad0a",  // s[1]
+    "0f14936a3b5aa4cb2d43c6570a3da297fce2f0245afcd9d381b6250f6bf6db0e",  // s[2]
+    "4ce856d20e8e7c92e0892d98dee29bcb30c9e7cdbedc146405f1ebc0b9c7df02",  // s[3]
+    "fba3db236a35211438528552efda2b8d05959804329ef5e69ffef0eb89b3da0b",  // s[4]
+    "6cd20b511a51bb792ab763a7e9b8f7c74a27ef8c56f36b9181d2c2ef887e5304",  // s[5]
+    "31d8c10abe8ae8332bca68f153e8a22efbab40824ac1d6c19df9e83896220d08",  // s[6]
+    "ffc0f0f6017fe251f235fa31893fcec243c991f53b750786d23fd6a687b39609",  // s[7]
+    "d4802e7c0718319b19d73596508ebec1e9f5153c4a0a97ca6d85920258389202",  // s[8]
+    "dbee9ec75e21a553e84a976a5f8aabb85f76f62cd204b9edf61d474dc7e7340e",  // s[9]
+    "106c78255b8783204ac88a3b2d606fc990fcfbfcc0e44ffc91f4b54fc07f9c0c",  // s[10]
+    "12ee74eceefc77e4d4e942350c2267125a4c406ff6c74e2563ddc9e4b7bddb02",  // s[11]
+    "2230d79cc606c61a79f4e4372702517667784a0adc31c7018258ea20c882710b",  // s[12]
+    "ceca35db4d6c7bd47192ad480de1852fd32f3722a4b070714f2673b6dff02906",  // s[13]
+    "8d25f0af108213c19cf585d16bdcad787d256215f38cb61c1611931b4a32b80e",  // s[14]
+    "1f45db8d05048dead7da814aa531d0c213871bcf1c1680ab4c6b579866d6c001",  // s[15]
+    "6313c8485d57afe65ee7b15a19b6fa978aac085cffbdc1933196e1901c10cd07",  // a
+};
+
+void xmr_random_scalar_stub(bignum256modm result, int index) {
+    if (index >= 0 && index < 17) {
+        uint8_t bytes[32];
+        hex_to_bytes(mock_random_values[index], bytes, 32);
+        expand256_modm(result, bytes, 32);
+    } else {
+        printf("[ERROR] Invalid index for mock random scalar: %d\n", index);
+    }
+}
+
+// Debug helper functions
+static void print_key_debug(const char* label, const uint8_t key[32]) {
+    for (int i = 0; i < 32; i++) {
+        printf("%02x", key[i]);
+    }
+    printf("\n");
+}
+
+static void print_scalar_debug(const char* label, const bignum256modm scalar) {
+    uint8_t bytes[32];
+    contract256_modm(bytes, scalar);
+}
 
 // Internal helper functions
 static void hash_to_scalar_clsag(const uint8_t *data, size_t len, bignum256modm result);
 static void hash_to_point_clsag(const uint8_t *data, size_t len, ge25519 *result);
-static void compute_aggregation_hashes(const ring_member_t *ring, size_t ring_size,
-                                     const uint8_t I[32], const uint8_t D[32], 
-                                     const uint8_t C_offset[32],
-                                     bignum256modm mu_P, bignum256modm mu_C);
-static void compute_round_hash(const uint8_t message[32], const ring_member_t *ring,
-                             size_t ring_size, const uint8_t C_offset[32],
-                             const uint8_t L[32], const uint8_t R[32],
-                             bignum256modm result);
+static void compute_aggregation_hashes(const ring_member_t *ring, size_t ring_size, const uint8_t I[32], const uint8_t D[32], const uint8_t C_offset[32], bignum256modm mu_P, bignum256modm mu_C, const uint8_t C_nonzero[][32]);
+static void compute_round_hash(const uint8_t message[32], const ring_member_t *ring, size_t ring_size, const uint8_t C_offset[32], const uint8_t L[32], const uint8_t R[32], bignum256modm result, const uint8_t C_nonzero[][32]);
 
 // Internal point arithmetic helpers
 static void ge25519_neg(ge25519 *result, const ge25519 *point);
 static void ge25519_sub(ge25519 *result, const ge25519 *a, const ge25519 *b);
 
 int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig) {
-    if (!params || !sig || !params->ring || params->ring_size < 2 || 
-        params->l >= params->ring_size || !sig->s) {
+    if (!params || !sig || !params->ring || params->ring_size < 2 || params->l >= params->ring_size || !sig->s){
         return 0;
     }
 
+    printf("Message (32 bytes): ");
+    for (int i = 0; i < 32; i++) {
+        printf("%02x", params->message[i]);
+    }
+    printf("\n");
+
+    // DEBUG: Function entry (minimal)
+    
     const size_t n = params->ring_size;
+
+    uint8_t (*C_nonzero)[32] = malloc(n * sizeof(uint8_t[32]));
+    if (!C_nonzero) {
+        return 0;  // Memory allocation failed
+    }
+
+    ge25519 C_offset_point;
+    ge25519_unpack_vartime(&C_offset_point, params->C_offset);
+
+    for (size_t i = 0; i < n; i++) {
+       ge25519 C_i, C_nonzero_point;
+       ge25519_unpack_vartime(&C_i, params->ring[i].mask);           // C[i]
+       ge25519_add(&C_nonzero_point, &C_i, &C_offset_point, 0);     // C[i] + C_offset
+       ge25519_pack(C_nonzero[i], &C_nonzero_point);                // Store as bytes
+    }
+    
+    // DEBUG: C_nonzero computation (skip - too verbose)
     
     // Clear output signature
     memset(sig->c1, 0, 32);
@@ -39,6 +101,8 @@ int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig) {
     expand256_modm(p_scalar, params->p, 32);
     expand256_modm(z_scalar, params->z, 32);
 
+    // DEBUG: Remove verbose secret scalars
+    
     // Compute key image I = p * H_p(P[l])
     ge25519 H_point, I_point;
     xmr_hash_to_ec(&H_point, params->ring[params->l].dest, 32);
@@ -65,10 +129,16 @@ int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig) {
     ge25519_scalarmult(&D_scaled, &H_point, z_div8);
     ge25519_pack(sig->D, &D_scaled);
 
+    // DEBUG: Key images (essential)
+    uint8_t H_bytes[32];
+    ge25519_pack(H_bytes, &H_point);
+   
+    uint8_t D_unscaled[32];
+    ge25519_pack(D_unscaled, &D_point);
+    
     // Compute aggregation hashes mu_P and mu_C
     bignum256modm mu_P, mu_C;
-    compute_aggregation_hashes(params->ring, n, sig->I, sig->D, 
-                             params->C_offset, mu_P, mu_C);
+    compute_aggregation_hashes(params->ring, n, sig->I, sig->D, params->C_offset, mu_P, mu_C, C_nonzero);
 
     // Generate random scalar a for commitment
     bignum256modm a;
@@ -85,8 +155,7 @@ int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig) {
 
     // Compute initial round hash
     bignum256modm c;
-    compute_round_hash(params->message, params->ring, n, params->C_offset,
-                      aG, aH, c);
+    compute_round_hash(params->message, params->ring, n, params->C_offset, aG, aH, c, C_nonzero);
 
     // Start ring traversal from next index
     size_t i = (params->l + 1) % n;
@@ -99,8 +168,10 @@ int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig) {
     ge25519_unpack_vartime(&I_point_precomp, sig->I);
     ge25519_unpack_vartime(&D_point_precomp, sig->D);
 
+    
     // Ring signature loop
     while (i != params->l) {
+        
         // Generate random scalar s[i]
         bignum256modm s_i;
         xmr_random_scalar(s_i);
@@ -117,16 +188,17 @@ int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig) {
         ge25519_unpack_vartime(&C_i, params->ring[i].mask);
         
         // Compute C[i] - C_offset
-        ge25519 C_offset_point;
-        ge25519_unpack_vartime(&C_offset_point, params->C_offset);
-        ge25519_sub(&C_diff, &C_i, &C_offset_point);
+        // ge25519 C_offset_point;
+        // ge25519_unpack_vartime(&C_offset_point, params->C_offset);
+        // // ge25519_sub(&C_diff, &C_i, &C_offset_point);
 
         // L = s[i]*G + c_P*P[i] + c_C*(C[i] - C_offset)
+        // Correction L= s[i]*G + c_P*P[i] + c_C*C[i]
         ge25519 term1, term2, term3;
         ge25519_scalarmult_base_wrapper(&term1, s_i);  // s[i]*G
         ge25519_scalarmult(&term2, &P_i, c_P);         // c_P*P[i]
-        ge25519_scalarmult(&term3, &C_diff, c_C);      // c_C*(C[i] - C_offset)
-        
+        ge25519_scalarmult(&term3, &C_i, c_C);      // c_C*(C[i] - C_offset  **Correction c_C*C[i]
+
         ge25519_add(&L_point, &term1, &term2, 0);
         ge25519_add(&L_point, &L_point, &term3, 0);
 
@@ -136,7 +208,9 @@ int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig) {
         
         ge25519_scalarmult(&term1, &H_i, s_i);              // s[i]*H_p(P[i])
         ge25519_scalarmult(&term2, &I_point_precomp, c_P);  // c_P*I  
-        ge25519_scalarmult(&term3, &D_point_precomp, c_C);  // c_C*D
+        // ge25519_scalarmult(&term3, &D_point_precomp, c_C);  // c_C*D
+        ge25519_scalarmult(&term3, &D_point, c_C);  // c_C*D
+
 
         ge25519_add(&R_point, &term1, &term2, 0);
         ge25519_add(&R_point, &R_point, &term3, 0);
@@ -147,8 +221,7 @@ int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig) {
         ge25519_pack(R, &R_point);
 
         // Compute next challenge c = H(domain, P, C, C_offset, message, L, R)
-        compute_round_hash(params->message, params->ring, n, params->C_offset,
-                          L, R, c);
+        compute_round_hash(params->message, params->ring, n, params->C_offset, L, R, c, C_nonzero);
 
         // Move to next ring member
         i = (i + 1) % n;
@@ -170,119 +243,8 @@ int clsag_sign(const clsag_params_t *params, clsag_signature_t *sig) {
     memset(&a, 0, sizeof(a));
     memset(&p_scalar, 0, sizeof(p_scalar));
     memset(&z_scalar, 0, sizeof(z_scalar));
-
+    free(C_nonzero);
     return 1;
-}
-
-int clsag_verify(const uint8_t message[32], 
-                 const ring_member_t *ring,
-                 size_t ring_size,
-                 const uint8_t C_offset[32],
-                 const clsag_signature_t *sig) {
-    
-    if (!message || !ring || !C_offset || !sig || !sig->s || 
-        ring_size < 2 || sig->ring_size != ring_size) {
-        return 0;
-    }
-
-    const size_t n = ring_size;
-
-    // Verify scalar ranges
-    bignum256modm c1_scalar;
-    expand256_modm(c1_scalar, sig->c1, 32);
-    if (!check256_modm(c1_scalar)) return 0;
-
-    for (size_t i = 0; i < n; i++) {
-        bignum256modm s_i;
-        expand256_modm(s_i, sig->s + i * 32, 32);
-        if (!check256_modm(s_i)) return 0;
-    }
-
-    // Verify key image is not identity
-    ge25519 I_point;
-    if (ge25519_unpack_vartime(&I_point, sig->I) == 0) return 0;
-    // Check I != identity (all zeros)
-    uint8_t identity[32] = {1,0}; // Identity point in compressed form
-    if (memcmp(sig->I, identity, 32) == 0) return 0;
-
-    // Scale D by 8 for computation
-    ge25519 D_point;
-    if (ge25519_unpack_vartime(&D_point, sig->D) == 0) return 0;
-    ge25519_mul8(&D_point, &D_point);
-
-    // Compute aggregation hashes
-    bignum256modm mu_P, mu_C;
-    compute_aggregation_hashes(ring, n, sig->I, sig->D, C_offset, mu_P, mu_C);
-
-    // Initialize verification loop
-    bignum256modm c;
-    copy256_modm(c, c1_scalar);
-
-    ge25519 C_offset_point;
-    if (ge25519_unpack_vartime(&C_offset_point, C_offset) == 0) return 0;
-
-    // Verify each ring member
-    for (size_t i = 0; i < n; i++) {
-        bignum256modm s_i;
-        expand256_modm(s_i, sig->s + i * 32, 32);
-
-        // Compute c_P = c * mu_P and c_C = c * mu_C
-        bignum256modm c_P, c_C;
-        mul256_modm(c_P, mu_P, c);
-        mul256_modm(c_C, mu_C, c);
-
-        // Verify L computation: L = s[i]*G + c_P*P[i] + c_C*(C[i] - C_offset)
-        ge25519 P_i, C_i, C_diff, L_point;
-        if (ge25519_unpack_vartime(&P_i, ring[i].dest) == 0) return 0;
-        if (ge25519_unpack_vartime(&C_i, ring[i].mask) == 0) return 0;
-        
-        ge25519_sub(&C_diff, &C_i, &C_offset_point);
-
-        ge25519 term1, term2, term3;
-        ge25519_scalarmult_base_wrapper(&term1, s_i);
-        ge25519_scalarmult(&term2, &P_i, c_P);
-        ge25519_scalarmult(&term3, &C_diff, c_C);
-        
-        ge25519_add(&L_point, &term1, &term2, 0);
-        ge25519_add(&L_point, &L_point, &term3, 0);
-
-        // Verify R computation: R = s[i]*H_p(P[i]) + c_P*I + c_C*D
-        ge25519 H_i, R_point;
-        xmr_hash_to_ec(&H_i, ring[i].dest, 32);
-        
-        ge25519_scalarmult(&term1, &H_i, s_i);
-        ge25519_scalarmult(&term2, &I_point, c_P);
-        ge25519_scalarmult(&term3, &D_point, c_C);
-
-        ge25519_add(&R_point, &term1, &term2, 0);
-        ge25519_add(&R_point, &R_point, &term3, 0);
-
-        // Compute next challenge
-        uint8_t L[32], R[32];
-        ge25519_pack(L, &L_point);
-        ge25519_pack(R, &R_point);
-
-        bignum256modm c_new;
-        compute_round_hash(message, ring, n, C_offset, L, R, c_new);
-        copy256_modm(c, c_new);
-    }
-
-    // Verify the ring closes: final c should equal c1
-    bignum256modm c_diff;
-    sub256_modm(c_diff, c, c1_scalar);
-    return iszero256_modm(c_diff);
-}
-
-void clsag_make_dummy(size_t ring_size, clsag_signature_t *sig) {
-    if (!sig || !sig->s || ring_size < 2) return;
-
-    // Set dummy values (identity point and zero scalars)
-    memset(sig->c1, 0, 32);
-    memset(sig->D, 0, 32);
-    memset(sig->I, 0, 32);
-    sig->I[0] = 1; // Compressed identity point
-    memset(sig->s, 0, ring_size * 32);
-    sig->ring_size = ring_size;
 }
 
 void clsag_clear(clsag_signature_t *sig) {
@@ -310,10 +272,7 @@ static void hash_to_point_clsag(const uint8_t *data, size_t len, ge25519 *result
     xmr_hash_to_ec(result, data, len);
 }
 
-static void compute_aggregation_hashes(const ring_member_t *ring, size_t ring_size,
-                                     const uint8_t I[32], const uint8_t D[32], 
-                                     const uint8_t C_offset[32],
-                                     bignum256modm mu_P, bignum256modm mu_C) {
+static void compute_aggregation_hashes(const ring_member_t *ring, size_t ring_size, const uint8_t I[32], const uint8_t D[32], const uint8_t C_offset[32], bignum256modm mu_P, bignum256modm mu_C, const uint8_t C_nonzero[][32]) {
     const size_t n = ring_size;
     
     // Build hash input: domain || P values || C values || I || D || C_offset
@@ -341,8 +300,8 @@ static void compute_aggregation_hashes(const ring_member_t *ring, size_t ring_si
     
     // Copy C values  
     for (size_t i = 0; i < n; i++) {
-        memcpy(hash_input_P + offset, ring[i].mask, 32);
-        memcpy(hash_input_C + offset, ring[i].mask, 32);
+        memcpy(hash_input_P + offset, C_nonzero[i], 32);
+        memcpy(hash_input_C + offset, C_nonzero[i], 32);
         offset += 32;
     }
     
@@ -358,6 +317,8 @@ static void compute_aggregation_hashes(const ring_member_t *ring, size_t ring_si
     memcpy(hash_input_P + offset, C_offset, 32);
     memcpy(hash_input_C + offset, C_offset, 32);
     
+    // DEBUG: Remove verbose aggregation hash inputs
+    
     // Compute hashes
     hash_to_scalar_clsag(hash_input_P, hash_size, mu_P);
     hash_to_scalar_clsag(hash_input_C, hash_size, mu_C);
@@ -366,10 +327,7 @@ static void compute_aggregation_hashes(const ring_member_t *ring, size_t ring_si
     free(hash_input_C);
 }
 
-static void compute_round_hash(const uint8_t message[32], const ring_member_t *ring,
-                             size_t ring_size, const uint8_t C_offset[32],
-                             const uint8_t L[32], const uint8_t R[32],
-                             bignum256modm result) {
+static void compute_round_hash(const uint8_t message[32], const ring_member_t *ring, size_t ring_size, const uint8_t C_offset[32], const uint8_t L[32], const uint8_t R[32], bignum256modm result, const uint8_t C_nonzero[][32]) {
     const size_t n = ring_size;
     
     // Build hash input: domain || P values || C values || C_offset || message || L || R
@@ -391,7 +349,7 @@ static void compute_round_hash(const uint8_t message[32], const ring_member_t *r
     
     // Copy C values
     for (size_t i = 0; i < n; i++) {
-        memcpy(hash_input + offset, ring[i].mask, 32);
+        memcpy(hash_input + offset, C_nonzero[i], 32);
         offset += 32;
     }
     
